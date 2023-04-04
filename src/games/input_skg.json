@@ -1,0 +1,37 @@
+{
+    "characters": {
+        "0": "Black dahlia",
+        "1": "Umbrella"
+
+    },
+    
+    "directions": {
+        "#": "⊡",
+        
+        "A": "⇐",
+        "S": "⇓",
+        "D": "⇒",
+        "-": "⇑",
+
+        "AS": "⇙",
+        "SD": "⇘",
+        "-A": "⇖",
+        "-D": "⇗"
+
+    },
+
+    "attacks": {
+        "P": "skg\\Sg_p.png",
+        "K": "skg\\Sg_k.png",
+        
+        "LP": "skg\\Sg_lp.png",
+        "MP": "skg\\Sg_mp.png",
+        "HP": "skg\\Sg_hp.png",
+
+        "LK": "skg\\Sg_lk.png",
+        "MK": "skg\\Sg_mk.png",
+        "HK": "skg\\Sg_hk.png"
+
+    }
+
+}
