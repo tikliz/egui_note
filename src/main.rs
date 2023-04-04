@@ -17,6 +17,8 @@ use crate::games::logic_default;
 use crate::games::logic_skg;
 use crate::games::logic_skg::translate_inputs;
 
+const GAME_LIST: &str = "src\\games\\game_list.json";
+
 fn main() -> Result<(), eframe::Error> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     tracing_subscriber::fmt::init();
@@ -48,11 +50,8 @@ fn main() -> Result<(), eframe::Error> {
 }
 
 struct MyApp {
-    image: Option<RetainedImage>,
     inputs: String,
     game_name: String,
-    age: u32,
-    texture: Option<egui::TextureHandle>,
     render_input: bool,
     new_line: bool,
     read_game_list: bool,
@@ -66,7 +65,6 @@ struct MyApp {
 impl Default for MyApp {
     fn default() -> Self {
         Self {
-            image: None,
             inputs: "2LK(1) 2MP 5HK
 jMK jHP
 5HP 236LP+LK
@@ -78,8 +76,6 @@ HK
 1"
             .to_owned(),
             game_name: "".to_owned(),
-            age: 42,
-            texture: None,
             new_line: false,
             render_input: false,
             read_game_list: true,
@@ -92,17 +88,65 @@ HK
     }
 }
 
+trait RemoveQuotes {
+    fn remove_quotes(self) -> Self;
+}
+
+impl RemoveQuotes for String {
+    fn remove_quotes(self) -> Self {
+        self.replace('\"', "")
+    }
+}
+
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        fn get_character_list(nself: &mut MyApp) {
+            nself.read_character_list = false;
+            nself.character_selected = None;
+            if let Some(selected) = nself
+                .game_list
+                .to_owned()
+                .unwrap()
+                .get(nself.game_selected.to_owned().unwrap())
+            {
+                let selected = selected.to_string().remove_quotes();
+                let character_list_str =
+                    fs::read_to_string(Path::new(&format!("src\\games\\input_{}.json", selected)))
+                        .expect("unable to read input_().json");
+                nself.character_list =
+                    serde_json::from_str(&character_list_str).expect("bad input_().json");
+                nself.character_list = nself
+                    .character_list
+                    .to_owned()
+                    .unwrap()
+                    .get("characters")
+                    .cloned();
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::CollapsingHeader::new("GAME OPTIONS")
                 .default_open(true)
                 .show(ui, |ui| {
+                    if self.read_game_list {
+                        self.read_game_list = false;
+                        let games_list_str = fs::read_to_string(Path::new(GAME_LIST))
+                            .expect("Unable to read game_list_name.json");
+                        self.game_list = serde_json::from_str(&games_list_str).expect("bad json.");
+                        if let Some(selected) =
+                            self.game_list.to_owned().unwrap().get("previous_choice")
+                        {
+                            if selected != "null" {
+                                self.game_selected = Some(selected.to_string().remove_quotes());
+                            };
+                        }
+                    }
+
                     // ui.label("Contents");
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             let temp_selection = self.game_selected.clone();
-                            
+
                             egui::ComboBox::from_label("")
                                 .selected_text(
                                     self.game_selected
@@ -110,18 +154,10 @@ impl eframe::App for MyApp {
                                         .unwrap_or("Select a game.".to_string()),
                                 )
                                 .show_ui(ui, |ui| {
-                                    if self.read_game_list {
-                                        self.read_game_list = false;
-                                        let games_list_str = fs::read_to_string(Path::new(
-                                            "src\\games\\game_list.json",
-                                        ))
-                                        .expect("Unable to read game_list_name.json");
-                                        self.game_list = serde_json::from_str(&games_list_str)
-                                            .expect("bad json.");
-                                    } else {
-                                        match self.game_list.to_owned().unwrap() {
-                                            Value::Object(obj) => {
-                                                for (k, v) in obj.iter() {
+                                    match self.game_list.to_owned().unwrap() {
+                                        Value::Object(obj) => {
+                                            for (k, v) in obj.iter() {
+                                                if k != "previous_choice" {
                                                     ui.selectable_value(
                                                         &mut self.game_selected,
                                                         Some(k.clone()),
@@ -129,14 +165,37 @@ impl eframe::App for MyApp {
                                                     );
                                                 }
                                             }
-                                            _ => {
-                                                println!("json is not an object.");
-                                            }
+                                        }
+                                        _ => {
+                                            panic!("json is not an object.");
                                         }
                                     }
-                                    self.read_character_list = self.game_selected != temp_selection;
-                                    println!("{}", self.read_character_list);
+                                    if self.character_list.is_some() {
+                                        self.read_character_list =
+                                            self.game_selected != temp_selection;
+                                    }
+                                    if self.read_character_list {
+                                        // save game choice to json
+                                        if let Some(choosen_game) = self
+                                            .game_list
+                                            .as_mut()
+                                            .unwrap()
+                                            .get_mut("previous_choice")
+                                        {
+                                            *choosen_game = Value::String(
+                                                self.game_selected.to_owned().unwrap(),
+                                            );
+                                        }
+                                        std::fs::write(
+                                            Path::new(GAME_LIST),
+                                            serde_json::to_string_pretty(&self.game_list).unwrap(),
+                                        )
+                                        .unwrap();
+
+                                        get_character_list(self);
+                                    }
                                 });
+
                             if self.game_selected.is_some() {
                                 if let Some(selected) = self
                                     .game_list
@@ -153,40 +212,14 @@ impl eframe::App for MyApp {
                                                     .unwrap_or("Select a character.".to_string()),
                                             )
                                             .show_ui(ui, |ui| {
-                                                if self.read_character_list {
-                                                    self.read_character_list = false;
-                                                    if let Some(selected) =
-                                                        self.game_list.to_owned().unwrap().get(
-                                                            self.game_selected.to_owned().unwrap(),
-                                                        )
-                                                    {
-                                                        let selected =
-                                                            selected.to_string().replace('\"', "");
-                                                        let character_list_str =
-                                                            fs::read_to_string(Path::new(
-                                                                &format!(
-                                                                    "src\\games\\input_{}.json",
-                                                                    selected
-                                                                ),
-                                                            ))
-                                                            .expect("unable to read input_().json");
-                                                        self.character_list = serde_json::from_str(
-                                                            &character_list_str,
-                                                        )
-                                                        .expect("bad input_().json");
-                                                        self.character_list = self
-                                                            .character_list
-                                                            .to_owned()
-                                                            .unwrap()
-                                                            .get("characters")
-                                                            .cloned();
-                                                    }
-                                                } //else {
+                                                if self.character_list.is_none() {
+                                                    get_character_list(self);
+                                                } else {
                                                     match self.character_list.to_owned().unwrap() {
                                                         Value::Object(obj) => {
                                                             for (k, v) in obj.iter() {
                                                                 let v =
-                                                                    v.to_string().replace('\"', "");
+                                                                    v.to_string().remove_quotes();
                                                                 ui.selectable_value(
                                                                     &mut self.character_selected,
                                                                     Some(v.clone()),
@@ -195,10 +228,10 @@ impl eframe::App for MyApp {
                                                             }
                                                         }
                                                         _ => {
-                                                            println!("json is not an object.");
+                                                            panic!("json is not an object.");
                                                         }
                                                     }
-                                                //}
+                                                }
                                             });
                                     });
                                 }
@@ -258,7 +291,7 @@ impl eframe::App for MyApp {
                                         .get(self.game_selected.to_owned().unwrap())
                                     {
                                         if !temp_char.contains("default") {
-                                            let selected = selected.to_string().replace('\"', "");
+                                            let selected = selected.to_string().remove_quotes();
                                             images_path =
                                                 format!("images\\{}\\{}", selected, temp_char);
                                         } else {
