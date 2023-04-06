@@ -3,6 +3,8 @@
 use eframe::egui;
 use egui::{ColorImage, Label};
 use egui_extras::RetainedImage;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -36,7 +38,7 @@ fn main() -> Result<(), eframe::Error> {
     // ]);
 
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(340.0, 440.0)),
+        initial_window_size: Some(egui::vec2(340.0, 460.0)),
         always_on_top: true,
         drag_and_drop_support: true,
         resizable: true,
@@ -49,6 +51,38 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
+// "0": {
+//     "name": "test 1",
+//     "inputs": "236P LK LP\n2P 5MK",
+//     "state": "n_done"
+
+// },
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct Character {
+    name: String,
+    combos: Vec<Option<Combo>>,
+}
+impl Character {
+    fn new(name: String, combos: Vec<Option<Combo>>) -> Self {
+        Self { name, combos }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct Combo {
+    name: String,
+    inputs: String,
+    state: ComboState,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+enum ComboState {
+    NotDone,
+    Done,
+    Testing,
+}
+
 struct MyApp {
     inputs: String,
     game_name: String,
@@ -58,12 +92,13 @@ struct MyApp {
     game_list: Option<Value>,
     game_selected: Option<String>,
     read_character_list: bool,
-    character_list: Option<Value>,
-    character_selected: Option<String>,
+    character_list: Option<Vec<Character>>,
+    character_selected: Option<Character>,
 }
 
 impl Default for MyApp {
     fn default() -> Self {
+        let mut vec: Vec<Character> = Vec::new();
         Self {
             inputs: "2LK(1) 2MP 5HK
 jMK jHP
@@ -82,7 +117,7 @@ HK
             game_list: None,
             game_selected: None,
             read_character_list: true,
-            character_list: None,
+            character_list: Some(vec),
             character_selected: None,
         }
     }
@@ -100,6 +135,8 @@ impl RemoveQuotes for String {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // println!("update!");
+
         fn get_character_list(nself: &mut MyApp) {
             nself.read_character_list = false;
             nself.character_selected = None;
@@ -109,18 +146,40 @@ impl eframe::App for MyApp {
                 .unwrap()
                 .get(nself.game_selected.to_owned().unwrap())
             {
+                nself.character_list.as_mut().unwrap().clear();
                 let selected = selected.to_string().remove_quotes();
                 let character_list_str =
                     fs::read_to_string(Path::new(&format!("src\\games\\input_{}.json", selected)))
                         .expect("unable to read input_().json");
-                nself.character_list =
+                let json: Value =
                     serde_json::from_str(&character_list_str).expect("bad input_().json");
-                nself.character_list = nself
-                    .character_list
-                    .to_owned()
-                    .unwrap()
-                    .get("characters")
-                    .cloned();
+                let characters = json.get("characters").unwrap();
+                match characters {
+                    Value::Object(obj) => {
+                        for (k, v) in obj.iter() {
+                            let temp: Value = serde_json::from_value(v.clone()).unwrap();
+                            let temp: Value = temp.get("combos").unwrap().to_owned();
+                            let mut temp_combos: Vec<Option<Combo>> = Vec::new();
+                            match temp {
+                                Value::Object(combo_obj) => {
+                                    for (combo_k, combo_v) in combo_obj {
+                                        let combo: Option<Combo> =
+                                            serde_json::from_value(combo_v).unwrap();
+                                        temp_combos.push(combo);
+                                    }
+                                }
+                                _ => panic!(),
+                            }
+                            // println!("{} - {:?}\n", k, v);
+                            let temp_character: Character =
+                                Character::new(k.to_string(), temp_combos);
+                            nself.character_list.as_mut().unwrap().push(temp_character);
+                        }
+                    }
+                    _ => {
+                        panic!("invalid json");
+                    }
+                };
             }
         }
 
@@ -140,6 +199,7 @@ impl eframe::App for MyApp {
                                 self.game_selected = Some(selected.to_string().remove_quotes());
                             };
                         }
+                        get_character_list(self);
                     }
 
                     // ui.label("Contents");
@@ -191,7 +251,6 @@ impl eframe::App for MyApp {
                                             serde_json::to_string_pretty(&self.game_list).unwrap(),
                                         )
                                         .unwrap();
-
                                         get_character_list(self);
                                     }
                                 });
@@ -207,29 +266,26 @@ impl eframe::App for MyApp {
                                     ui.horizontal(|ui| {
                                         egui::ComboBox::from_label("")
                                             .selected_text(
-                                                self.character_selected
-                                                    .to_owned()
-                                                    .unwrap_or("Select a character.".to_string()),
+                                                if self.character_selected.is_some() {
+                                                    self.character_selected.as_ref().unwrap().name.clone()
+
+                                                } else {
+                                                    "Select a character".to_string()
+
+                                                }
                                             )
                                             .show_ui(ui, |ui| {
                                                 if self.character_list.is_none() {
                                                     get_character_list(self);
                                                 } else {
-                                                    match self.character_list.to_owned().unwrap() {
-                                                        Value::Object(obj) => {
-                                                            for (k, v) in obj.iter() {
-                                                                let v =
-                                                                    v.to_string().remove_quotes();
-                                                                ui.selectable_value(
-                                                                    &mut self.character_selected,
-                                                                    Some(v.clone()),
-                                                                    v,
-                                                                );
-                                                            }
-                                                        }
-                                                        _ => {
-                                                            panic!("json is not an object.");
-                                                        }
+                                                    for c in self.character_list.as_ref().unwrap() {
+                                                        let c_name =
+                                                            c.name.to_owned().remove_quotes();
+                                                        ui.selectable_value(
+                                                            &mut self.character_selected,
+                                                            Some(c.to_owned()),
+                                                            c_name,
+                                                        );
                                                     }
                                                 }
                                             });
