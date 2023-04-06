@@ -3,6 +3,7 @@
 use eframe::egui;
 use egui::{ColorImage, Label};
 use egui_extras::RetainedImage;
+use indexmap::IndexMap;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -76,6 +77,16 @@ struct Combo {
     state: ComboState,
 }
 
+impl Combo {
+    fn new(name: String, inputs: String, state: ComboState) -> Self {
+        Self {
+            name,
+            inputs,
+            state,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 enum ComboState {
     NotDone,
@@ -91,6 +102,8 @@ struct MyApp {
     read_game_list: bool,
     game_list: Option<Value>,
     game_selected: Option<String>,
+    game_json: Option<Value>,
+    game_path: Option<String>,
     read_character_list: bool,
     character_list: Option<Vec<Character>>,
     character_selected: Option<Character>,
@@ -116,6 +129,8 @@ HK
             read_game_list: true,
             game_list: None,
             game_selected: None,
+            game_json: None,
+            game_path: None,
             read_character_list: true,
             character_list: Some(vec),
             character_selected: None,
@@ -136,6 +151,44 @@ impl RemoveQuotes for String {
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // println!("update!");
+        fn add_combo(c: Character, nself: &mut MyApp, new_combo: Combo) {
+            nself.character_selected.as_mut().unwrap().combos.push(Some(new_combo.clone()));
+            let mut i: usize;
+            if c.combos.is_empty() {
+                i = 0;
+            } else {
+                i = c.combos.len();
+            }
+            //let temp_json = serde_json::to_string(&test[2]).unwrap();
+            let mut combos_map = IndexMap::new();
+            for (i, combo) in c.combos.into_iter().enumerate() {
+                combos_map.insert(i.to_string(), combo);
+            }
+            combos_map.insert(i.to_string(), Some(new_combo));
+            if let Some(character) =
+                nself.game_json.as_mut().unwrap()["characters"][c.name].as_object_mut()
+            {
+                if let Some(combos) = character["combos"].as_object_mut() {
+                    // convert indexmap to string, then to a json_literal
+                    let json_literal = serde_json::to_string(&combos_map).unwrap();
+                    let json_literal: Value = serde_json::from_str(json_literal.as_str()).unwrap();
+                    *combos = json_literal.as_object().unwrap().to_owned();
+                }
+            }
+            let formatted_json =
+                serde_json::to_string_pretty(nself.game_json.as_ref().unwrap()).unwrap();
+            //println!("adding {}", formatted_json);
+            fs::write(
+                Path::new(&nself.game_path.to_owned().unwrap()),
+                formatted_json,
+            )
+            .unwrap();
+            let character_list_str =
+                fs::read_to_string(Path::new(nself.game_path.as_ref().unwrap()))
+                    .expect("unable to read input_().json");
+            nself.game_json = serde_json::from_str(&character_list_str).expect("bad input_().json");
+            println!("insane {:?}", nself.game_json);
+        }
 
         fn get_character_list(nself: &mut MyApp) {
             nself.read_character_list = false;
@@ -148,12 +201,13 @@ impl eframe::App for MyApp {
             {
                 nself.character_list.as_mut().unwrap().clear();
                 let selected = selected.to_string().remove_quotes();
+                nself.game_path = Some(format!("src\\games\\input_{}.json", selected));
                 let character_list_str =
-                    fs::read_to_string(Path::new(&format!("src\\games\\input_{}.json", selected)))
+                    fs::read_to_string(Path::new(nself.game_path.as_ref().unwrap()))
                         .expect("unable to read input_().json");
-                let json: Value =
+                nself.game_json =
                     serde_json::from_str(&character_list_str).expect("bad input_().json");
-                let characters = json.get("characters").unwrap();
+                let characters = nself.game_json.as_ref().unwrap().get("characters").unwrap();
                 match characters {
                     Value::Object(obj) => {
                         for (k, v) in obj.iter() {
@@ -180,6 +234,7 @@ impl eframe::App for MyApp {
                         panic!("invalid json");
                     }
                 };
+                println!("game list - {:?}", nself.game_list);
             }
         }
 
@@ -265,15 +320,15 @@ impl eframe::App for MyApp {
                                     ui.end_row();
                                     ui.horizontal(|ui| {
                                         egui::ComboBox::from_label("")
-                                            .selected_text(
-                                                if self.character_selected.is_some() {
-                                                    self.character_selected.as_ref().unwrap().name.clone()
-
-                                                } else {
-                                                    "Select a character".to_string()
-
-                                                }
-                                            )
+                                            .selected_text(if self.character_selected.is_some() {
+                                                self.character_selected
+                                                    .as_ref()
+                                                    .unwrap()
+                                                    .name
+                                                    .clone()
+                                            } else {
+                                                "Select a character".to_string()
+                                            })
                                             .show_ui(ui, |ui| {
                                                 if self.character_list.is_none() {
                                                     get_character_list(self);
@@ -377,6 +432,29 @@ impl eframe::App for MyApp {
                 }
                 if ui.button("Toggle").clicked() {
                     self.render_input = !self.render_input;
+                }
+                let temp_combo = Combo::new(
+                    "blabla".to_string(),
+                    "2P LP PP".to_string(),
+                    ComboState::Testing,
+                );
+                let temp_combo2 = Combo::new(
+                    "lala".to_string(),
+                    "2P LP PP".to_string(),
+                    ComboState::Testing,
+                );
+                if ui.button("ADD TEST").clicked() {
+                    add_combo(
+                        self.character_selected.to_owned().unwrap(),
+                        self,
+                        temp_combo,
+                    );
+                    println!("\n\n\ncat {:?}", self.game_json);
+                    // add_combo(
+                    //     self.character_selected.to_owned().unwrap(),
+                    //     self,
+                    //     temp_combo2,
+                    // );
                 }
 
                 //ui.label(format!("Hello '{}', age {}", self.name, self.age));
