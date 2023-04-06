@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::egui;
+use egui::Pos2;
 use egui::{ColorImage, Label};
 use egui_extras::RetainedImage;
 use indexmap::IndexMap;
@@ -8,7 +9,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
+use std::{fs, default};
 use std::fs::read_to_string;
 use std::fs::File;
 use std::io::BufReader;
@@ -21,6 +22,7 @@ use crate::games::logic_skg;
 use crate::games::logic_skg::translate_inputs;
 
 const GAME_LIST: &str = "src\\games\\game_list.json";
+const WIDTH: f32 = 340.0;
 
 fn main() -> Result<(), eframe::Error> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
@@ -39,7 +41,7 @@ fn main() -> Result<(), eframe::Error> {
     // ]);
 
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(340.0, 460.0)),
+        initial_window_size: Some(egui::vec2(WIDTH, 460.0)),
         always_on_top: true,
         drag_and_drop_support: true,
         resizable: true,
@@ -95,8 +97,11 @@ enum ComboState {
 }
 
 struct MyApp {
+    show_window: bool,
+    new_inputs: String,
     inputs: String,
-    game_name: String,
+    combo_selector: f32,
+    description: String,
     render_input: bool,
     new_line: bool,
     read_game_list: bool,
@@ -107,6 +112,7 @@ struct MyApp {
     read_character_list: bool,
     character_list: Option<Vec<Character>>,
     character_selected: Option<Character>,
+    previous_choice: Option<String>,
 }
 
 impl Default for MyApp {
@@ -123,7 +129,11 @@ LP
 HK
 1"
             .to_owned(),
-            game_name: "".to_owned(),
+            show_window: false,
+            description: "".to_owned(),
+            new_inputs: "".to_owned(),
+            combo_selector: 0.0,
+
             new_line: false,
             render_input: false,
             read_game_list: true,
@@ -134,6 +144,7 @@ HK
             read_character_list: true,
             character_list: Some(vec),
             character_selected: None,
+            previous_choice: None,
         }
     }
 }
@@ -152,7 +163,12 @@ impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // println!("update!");
         fn add_combo(c: Character, nself: &mut MyApp, new_combo: Combo) {
-            nself.character_selected.as_mut().unwrap().combos.push(Some(new_combo.clone()));
+            nself
+                .character_selected
+                .as_mut()
+                .unwrap()
+                .combos
+                .push(Some(new_combo.clone()));
             let mut i: usize;
             if c.combos.is_empty() {
                 i = 0;
@@ -187,10 +203,10 @@ impl eframe::App for MyApp {
                 fs::read_to_string(Path::new(nself.game_path.as_ref().unwrap()))
                     .expect("unable to read input_().json");
             nself.game_json = serde_json::from_str(&character_list_str).expect("bad input_().json");
-            println!("insane {:?}", nself.game_json);
         }
 
         fn get_character_list(nself: &mut MyApp) {
+            nself.combo_selector = 0.0;
             nself.read_character_list = false;
             nself.character_selected = None;
             if let Some(selected) = nself
@@ -237,7 +253,6 @@ impl eframe::App for MyApp {
                 println!("game list - {:?}", nself.game_list);
             }
         }
-
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::CollapsingHeader::new("GAME OPTIONS")
                 .default_open(true)
@@ -261,8 +276,7 @@ impl eframe::App for MyApp {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             let temp_selection = self.game_selected.clone();
-
-                            egui::ComboBox::from_label("")
+                            egui::ComboBox::from_id_source("character_select")
                                 .selected_text(
                                     self.game_selected
                                         .to_owned()
@@ -271,7 +285,7 @@ impl eframe::App for MyApp {
                                 .show_ui(ui, |ui| {
                                     match self.game_list.to_owned().unwrap() {
                                         Value::Object(obj) => {
-                                            for (k, v) in obj.iter() {
+                                            for (k, _v) in obj.iter() {
                                                 if k != "previous_choice" {
                                                     ui.selectable_value(
                                                         &mut self.game_selected,
@@ -311,7 +325,7 @@ impl eframe::App for MyApp {
                                 });
 
                             if self.game_selected.is_some() {
-                                if let Some(selected) = self
+                                if let Some(_selected) = self
                                     .game_list
                                     .to_owned()
                                     .unwrap()
@@ -319,7 +333,7 @@ impl eframe::App for MyApp {
                                 {
                                     ui.end_row();
                                     ui.horizontal(|ui| {
-                                        egui::ComboBox::from_label("")
+                                        egui::ComboBox::from_id_source("character_box")
                                             .selected_text(if self.character_selected.is_some() {
                                                 self.character_selected
                                                     .as_ref()
@@ -343,6 +357,13 @@ impl eframe::App for MyApp {
                                                         );
                                                     }
                                                 }
+                                                if let Some(selected) = self.character_selected.as_ref() {
+                                                    if Some(selected.name.clone()) != self.previous_choice {
+                                                        self.combo_selector = 0.0;
+
+                                                    }
+
+                                                }
                                             });
                                     });
                                 }
@@ -351,28 +372,116 @@ impl eframe::App for MyApp {
 
                         //ui.add_space(70.00);
                         egui::CollapsingHeader::new("ADD").show(ui, |ui| {
-                            let game_name = ui.label("Body");
-                            ui.text_edit_singleline(&mut self.game_name)
-                                .labelled_by(game_name.id);
+                            if ui.button("ADD COMBO").clicked() {
+                                self.show_window = !self.show_window;
+                            }
+                            if self.show_window {
+                                egui::Window::new("ADD NEW COMBO")
+                                    .collapsible(false)
+                                    .min_width(WIDTH + 20.0)
+                                    .auto_sized()
+                                    .fixed_pos(Pos2::new(0.0, 0.0))
+                                    .show(ctx, |ui| {
+                                        ui.label(
+                                            self.game_selected
+                                                .as_ref()
+                                                .unwrap_or(&"what".to_string()),
+                                        );
+                                        ui.horizontal(|ui| {
+                                            egui::ComboBox::from_label("")
+                                                .selected_text(
+                                                    if self.character_selected.is_some() {
+                                                        self.character_selected
+                                                            .as_ref()
+                                                            .unwrap()
+                                                            .name
+                                                            .clone()
+                                                    } else {
+                                                        "Select a character".to_string()
+                                                    },
+                                                )
+                                                .show_ui(ui, |ui| {
+                                                    if self.character_list.is_none() {
+                                                        get_character_list(self);
+                                                    } else {
+                                                        for c in
+                                                            self.character_list.as_ref().unwrap()
+                                                        {
+                                                            let c_name =
+                                                                c.name.to_owned().remove_quotes();
+                                                            ui.selectable_value(
+                                                                &mut self.character_selected,
+                                                                Some(c.to_owned()),
+                                                                c_name,
+                                                            );
+                                                        }
+                                                    }
+                                                })
+                                        });
+                                        ui.horizontal_wrapped(|ui| {
+                                            let game_name = ui.label("Name: ");
+                                            ui.text_edit_singleline(&mut self.description)
+                                                .labelled_by(game_name.id);
+                                        });
+                                        ui.horizontal_wrapped(|ui| {
+                                            let inputs = ui.label("Inputs: ");
+                                            ui.text_edit_multiline(&mut self.new_inputs)
+                                                .labelled_by(inputs.id);
+                                        });
+
+                                        ui.add_space(10.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            if ui.button("ADD TEST").clicked() {
+                                                let temp_combo = Combo::new(
+                                                    self.description.to_owned(),
+                                                    self.new_inputs.to_ascii_uppercase(),
+                                                    ComboState::Testing,
+                                                );
+                                                add_combo(
+                                                    self.character_selected.to_owned().unwrap(),
+                                                    self,
+                                                    temp_combo,
+                                                );
+                                                self.new_inputs = "".to_owned();
+                                                self.description = "".to_owned();
+                                                self.show_window = false;
+                                            };
+                                            if ui.button("CANCEL").clicked() {
+                                                self.new_inputs = "".to_owned();
+                                                self.description = "".to_owned();
+                                                self.show_window = false;
+                                            };
+                                        });
+                                    });
+                            }
                         });
                     });
                 });
             egui::ScrollArea::vertical().show(ui, |ui| {
+                if self.character_selected.is_some() && !self.character_selected.as_ref().unwrap().combos.is_empty() {
+                    let slider_size: f32 =
+                        self.character_selected.as_ref().unwrap().combos.len() as f32 - 1.0;
+                    if slider_size < self.combo_selector { self.combo_selector = slider_size};
+                    let combo_selector = self.combo_selector as usize;
+                    let selected_combos = self.character_selected.as_ref().unwrap().combos[combo_selector]
+                    .to_owned()
+                    .unwrap();
+                    ui.add(
+                        egui::Slider::new(&mut self.combo_selector, 0.0..=slider_size).step_by(1.0).fixed_decimals(0).text(
+                            selected_combos.name,
+                        ),
+                    );
+                    self.inputs = selected_combos.inputs;
+                }
                 egui::CollapsingHeader::new("INPUTS").show(ui, |ui| {
                     let name_label = ui.label("Inputs: ");
                     ui.text_edit_multiline(&mut self.inputs)
                         .labelled_by(name_label.id);
                 });
-                // ui.horizontal(|ui| {
-                //     let name_label = ui.label("Inputs: ");
-                //     ui.text_edit_multiline(&mut self.inputs)
-                //         .labelled_by(name_label.id);
-                // });
-                // ui.add(egui::Slider::new(&mut self.age, 0..=120).text("age"));
-                if self.render_input && self.inputs.len() > 0 {
+                if self.render_input && !self.inputs.is_empty() {
                     ui.horizontal_wrapped(|ui| {
                         //ui.label("test");
-                        let mut temp_char: Option<String> = None;
+                        let mut temp_char: Option<String>;
                         let mut append_next = false;
                         let mut weight = None;
                         for c in self.inputs.chars() {
@@ -433,28 +542,13 @@ impl eframe::App for MyApp {
                 if ui.button("Toggle").clicked() {
                     self.render_input = !self.render_input;
                 }
-                let temp_combo = Combo::new(
-                    "blabla".to_string(),
-                    "2P LP PP".to_string(),
-                    ComboState::Testing,
-                );
-                let temp_combo2 = Combo::new(
-                    "lala".to_string(),
-                    "2P LP PP".to_string(),
-                    ComboState::Testing,
-                );
-                if ui.button("ADD TEST").clicked() {
-                    add_combo(
-                        self.character_selected.to_owned().unwrap(),
-                        self,
-                        temp_combo,
-                    );
-                    println!("\n\n\ncat {:?}", self.game_json);
-                    // add_combo(
-                    //     self.character_selected.to_owned().unwrap(),
-                    //     self,
-                    //     temp_combo2,
-                    // );
+                
+                if let Some(previous) = self.character_selected.as_ref() {
+                    self.previous_choice = Some(previous.name.to_owned());
+
+                } else {
+                    self.previous_choice = Some("Select a character".to_string());
+                    
                 }
 
                 //ui.label(format!("Hello '{}', age {}", self.name, self.age));
