@@ -42,6 +42,7 @@ fn main() -> Result<(), eframe::Error> {
 
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(WIDTH, 460.0)),
+        initial_window_pos: Some(Pos2 { x: 140.0, y: 0.0 }),
         always_on_top: true,
         drag_and_drop_support: true,
         resizable: true,
@@ -360,6 +361,11 @@ impl eframe::App for MyApp {
                                                 if let Some(selected) = self.character_selected.as_ref() {
                                                     if Some(selected.name.clone()) != self.previous_choice {
                                                         self.combo_selector = 0.0;
+                                                        if !self.character_selected.as_ref().unwrap().combos.is_empty() {
+                                                                self.inputs = self.character_selected.as_ref().unwrap().combos[self.combo_selector as usize].to_owned().unwrap().inputs;
+                                                            
+
+                                                        }
 
                                                     }
 
@@ -463,15 +469,18 @@ impl eframe::App for MyApp {
                         self.character_selected.as_ref().unwrap().combos.len() as f32 - 1.0;
                     if slider_size < self.combo_selector { self.combo_selector = slider_size};
                     let combo_selector = self.combo_selector as usize;
-                    let selected_combos = self.character_selected.as_ref().unwrap().combos[combo_selector]
+                    let selected_combos = self.character_selected.as_ref().unwrap().combos[self.combo_selector as usize]
                     .to_owned()
                     .unwrap();
-                    ui.add(
+                    if ui.add(
                         egui::Slider::new(&mut self.combo_selector, 0.0..=slider_size).step_by(1.0).fixed_decimals(0).text(
-                            selected_combos.name,
+                            selected_combos.inputs,
                         ),
-                    );
-                    self.inputs = selected_combos.inputs;
+                    ).changed() {
+                        self.inputs = self.character_selected.as_ref().unwrap().combos[self.combo_selector as usize].clone().unwrap().inputs;
+
+                    };
+                    
                 }
                 egui::CollapsingHeader::new("INPUTS").show(ui, |ui| {
                     let name_label = ui.label("Inputs: ");

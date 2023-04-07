@@ -11,39 +11,18 @@
   },
   "characters": {
     "Black dahlia": {
-      "combos": {
-        "0": {
-          "inputs": "236P LK LP\n2P 5MK",
-          "name": "test 1",
-          "state": "Done"
-        },
-        "1": {
-          "inputs": "2HP HP 8LP\n214P+P 5MK",
-          "name": "test 2",
-          "state": "Done"
-        }
-      }
+      "combos": {}
     },
     "Rhen": {
       "combos": {
         "0": {
-          "inputs": "2P LP PP",
-          "name": "blabla",
+          "inputs": "2PP",
+          "name": "2PP",
           "state": "Testing"
         },
         "1": {
-          "inputs": "2P LP PP",
-          "name": "blabla",
-          "state": "Testing"
-        },
-        "2": {
-          "inputs": "2P LP PP",
-          "name": "blabla",
-          "state": "Testing"
-        },
-        "3": {
-          "inputs": "2P LP PP",
-          "name": "blabla",
+          "inputs": "LP",
+          "name": "LP",
           "state": "Testing"
         }
       }
