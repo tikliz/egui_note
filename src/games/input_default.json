@@ -1,0 +1,17 @@
+{
+    "movement": {
+        "1": "default\\down-left.gif",
+        "2": "default\\down.gif",
+        "3": "default\\down-right.gif",
+        "4": "default\\left.gif",
+        "5": "default\\neutral.png",
+        "6": "default\\right.gif",
+        "7": "default\\up-left.gif",
+        "8": "default\\up.gif",
+        "9": "default\\up-right.gif",
+        "_": "default\\err.png",
+        " ": "default\\space.png"
+
+    }
+
+}

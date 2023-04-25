@@ -2,16 +2,35 @@
   "attacks": {
     "HK": "skg\\Sg_hk.png",
     "HP": "skg\\Sg_hp.png",
+    "J": "default\\up.gif",
     "K": "skg\\Sg_k.png",
     "LK": "skg\\Sg_lk.png",
     "LP": "skg\\Sg_lp.png",
     "MK": "skg\\Sg_mk.png",
     "MP": "skg\\Sg_mp.png",
-    "P": "skg\\Sg_p.png"
+    "P": "skg\\Sg_p.png",
+    "\\(1\\)": "default\\plink.png",
+    "\\+": "default\\plus.png"
   },
   "characters": {
     "Black dahlia": {
-      "combos": {}
+      "combos": {
+        "0": {
+          "inputs": "2LK(1) 2MP 5HK\nJMK JHP\n2MP 5HK\nJMP JHP\n2LK 5MP 5HP 236LP+LK 236(MK+HK)\n5LPX2 2LK 5MP 2[HP]",
+          "name": "Bnb Beginner",
+          "state": "Testing"
+        },
+        "1": {
+          "inputs": "2P(1)",
+          "name": "test1",
+          "state": "Testing"
+        },
+        "2": {
+          "inputs": "(1)",
+          "name": "test2",
+          "state": "Testing"
+        }
+      }
     },
     "Rhen": {
       "combos": {

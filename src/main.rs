@@ -5,21 +5,19 @@ use egui::Pos2;
 use egui::{ColorImage, Label};
 use egui_extras::RetainedImage;
 use indexmap::IndexMap;
+use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::{fs, default};
 use std::fs::read_to_string;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::Path;
+use std::{default, fs};
 
 pub mod games;
-use crate::games::logic_default;
-use crate::games::logic_skg;
-use crate::games::logic_skg::translate_inputs;
 
 const GAME_LIST: &str = "src\\games\\game_list.json";
 const WIDTH: f32 = 340.0;
@@ -27,18 +25,6 @@ const WIDTH: f32 = 340.0;
 fn main() -> Result<(), eframe::Error> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     tracing_subscriber::fmt::init();
-
-    // let input_num_direc = HashMap::from([
-    //     (1, "..\\images\\arrows\\1.gif".to_string()),
-    //     (2, "..\\images\\arrows\\2.gif".to_string()),
-    //     (3, "..\\images\\arrows\\3.gif".to_string()),
-    //     (4, "..\\images\\arrows\\4.gif".to_string()),
-    //     (5, "⊡".to_string()),
-    //     (6, "..\\images\\arrows\\6.gif".to_string()),
-    //     (7, "..\\images\\arrows\\7.gif".to_string()),
-    //     (8, "..\\images\\arrows\\8.gif".to_string()),
-    //     (9, "..\\images\\arrows\\9.gif".to_string()),
-    // ]);
 
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(WIDTH, 460.0)),
@@ -54,13 +40,6 @@ fn main() -> Result<(), eframe::Error> {
         Box::new(|_cc| Box::new(MyApp::default())),
     )
 }
-
-// "0": {
-//     "name": "test 1",
-//     "inputs": "236P LK LP\n2P 5MK",
-//     "state": "n_done"
-
-// },
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 struct Character {
@@ -103,13 +82,18 @@ struct MyApp {
     inputs: String,
     combo_selector: f32,
     description: String,
-    render_input: bool,
+    show_images: bool,
     new_line: bool,
     read_game_list: bool,
     game_list: Option<Value>,
     game_selected: Option<String>,
+    get_images: bool,
+    default_json: Value,
+    retained_images: Vec<Option<RetainedImage>>,
+    mapped_inputs: Vec<Option<Vec<String>>>,
     game_json: Option<Value>,
     game_path: Option<String>,
+    changed_inputs: bool,
     read_character_list: bool,
     character_list: Option<Vec<Character>>,
     character_selected: Option<Character>,
@@ -135,11 +119,16 @@ HK
             new_inputs: "".to_owned(),
             combo_selector: 0.0,
 
+            get_images: true,
+            retained_images: vec![None],
+            mapped_inputs: vec![None],
+            changed_inputs: true,
             new_line: false,
-            render_input: false,
+            show_images: false,
             read_game_list: true,
             game_list: None,
             game_selected: None,
+            default_json: serde_json::from_str(include_str!("games\\input_default.json")).unwrap(),
             game_json: None,
             game_path: None,
             read_character_list: true,
@@ -159,7 +148,7 @@ impl RemoveQuotes for String {
         self.replace('\"', "")
     }
 }
-
+const REGEX_STUFF:  [&str; 7] = ["+", "*", "?", "[", "]", "(", ")"];
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // println!("update!");
@@ -251,9 +240,55 @@ impl eframe::App for MyApp {
                         panic!("invalid json");
                     }
                 };
-                println!("game list - {:?}", nself.game_list);
+                // println!("game list - {:?}", nself.game_list);
             }
         }
+        fn compare_combinations(
+            combinations: &mut String,
+            attacks: &mut [String],
+        ) -> Option<Vec<String>> {
+            for a in attacks.iter_mut() {
+                //println!("274: {}", a);
+                if *a == "+" || *a == "*" || *a == "?"  || *a == "[" || *a == "]" {
+                    *a = format!("\\{}", a);
+                }
+
+            }
+            // *combinations = combinations.replace('(', "\\(");
+            // *combinations = combinations.replace(')', "\\)");
+
+            let attacks_re = attacks.join("|").to_ascii_uppercase();
+            let re = Regex::new(&attacks_re).unwrap();
+            // println!("285: {:?}", re);
+            let mut temp_inputs: Vec<String> = Vec::new();
+            let mut mapped_inputs: Vec<Vec<String>> = Vec::new();
+            let mut temp_combination = combinations.to_string();
+            while temp_inputs.join("").len() < combinations.len() {
+                while let Some(m) = re.find(temp_combination.clone().as_str()) {
+                    let temp_temp = temp_combination.clone();
+                    let mut tokens: Vec<&str> = temp_temp.splitn(2, m.as_str()).collect();
+                    // println!("293: {:?}", tokens);
+                    if !tokens[0].is_empty() {
+                        temp_combination.remove(0);
+                        temp_inputs.push("0".to_string());
+                    } else {
+                        let mut token = m.as_str().to_owned();
+                        for c in REGEX_STUFF {
+                            token = token.replace(c, format!("\\{}", c).as_str());
+
+                        }
+                        temp_combination = tokens[1].to_owned();
+                        temp_inputs.push(token);
+                    }
+                }
+                if temp_inputs.join("").len() < combinations.len() {
+                    temp_inputs.push("0".to_string());
+                }
+            }
+            mapped_inputs.push(temp_inputs.clone());
+            Some(temp_inputs)
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::CollapsingHeader::new("GAME OPTIONS")
                 .default_open(true)
@@ -271,6 +306,36 @@ impl eframe::App for MyApp {
                             };
                         }
                         get_character_list(self);
+                    }
+                    if self.get_images {
+                        self.get_images = false;
+                        self.retained_images.clear();
+                        for (_k, v) in self.game_json.as_ref().unwrap()["attacks"]
+                            .as_object()
+                            .unwrap()
+                            .iter()
+                        {
+                            if v != "skip" {
+                                let mut buffer = vec![];
+                                let v = v.to_string().remove_quotes();
+                                let path = format!("images\\{}", v);
+                                File::open(&path).unwrap().read_to_end(&mut buffer).unwrap();
+                                let retained = RetainedImage::from_image_bytes(v, &buffer).unwrap();
+                                self.retained_images.push(Some(retained));
+
+                            }
+                        }
+                        for (_k, v) in self.default_json["movement"].as_object().unwrap().iter() {
+                            if v != "skip" {
+                                let mut buffer = vec![];
+                                let v = v.to_string().remove_quotes();
+                                let path = format!("images\\{}", v);
+                                File::open(&path).unwrap().read_to_end(&mut buffer).unwrap();
+                                let retained = RetainedImage::from_image_bytes(v, &buffer).unwrap();
+                                self.retained_images.push(Some(retained));
+
+                            }
+                        }
                     }
 
                     // ui.label("Contents");
@@ -306,6 +371,8 @@ impl eframe::App for MyApp {
                                     }
                                     if self.read_character_list {
                                         // save game choice to json
+                                        self.get_images = true;
+                                        self.changed_inputs = true;
                                         if let Some(choosen_game) = self
                                             .game_list
                                             .as_mut()
@@ -351,24 +418,45 @@ impl eframe::App for MyApp {
                                                     for c in self.character_list.as_ref().unwrap() {
                                                         let c_name =
                                                             c.name.to_owned().remove_quotes();
-                                                        ui.selectable_value(
-                                                            &mut self.character_selected,
-                                                            Some(c.to_owned()),
-                                                            c_name,
-                                                        );
+                                                        if ui
+                                                            .selectable_value(
+                                                                &mut self.character_selected,
+                                                                Some(c.to_owned()),
+                                                                c_name,
+                                                            )
+                                                            .changed()
+                                                        {
+                                                            // println!("changed char");
+                                                            self.changed_inputs = true;
+                                                            self.mapped_inputs.clear();
+                                                        };
                                                     }
                                                 }
-                                                if let Some(selected) = self.character_selected.as_ref() {
-                                                    if Some(selected.name.clone()) != self.previous_choice {
+                                                if let Some(selected) =
+                                                    self.character_selected.as_ref()
+                                                {
+                                                    if Some(selected.name.clone())
+                                                        != self.previous_choice
+                                                    {
                                                         self.combo_selector = 0.0;
-                                                        if !self.character_selected.as_ref().unwrap().combos.is_empty() {
-                                                                self.inputs = self.character_selected.as_ref().unwrap().combos[self.combo_selector as usize].to_owned().unwrap().inputs;
-                                                            
-
+                                                        if !self
+                                                            .character_selected
+                                                            .as_ref()
+                                                            .unwrap()
+                                                            .combos
+                                                            .is_empty()
+                                                        {
+                                                            self.inputs = self
+                                                                .character_selected
+                                                                .as_ref()
+                                                                .unwrap()
+                                                                .combos
+                                                                [self.combo_selector as usize]
+                                                                .to_owned()
+                                                                .unwrap()
+                                                                .inputs;
                                                         }
-
                                                     }
-
                                                 }
                                             });
                                     });
@@ -464,100 +552,127 @@ impl eframe::App for MyApp {
                     });
                 });
             egui::ScrollArea::vertical().show(ui, |ui| {
-                if self.character_selected.is_some() && !self.character_selected.as_ref().unwrap().combos.is_empty() {
+                if self.character_selected.is_some()
+                    && !self.character_selected.as_ref().unwrap().combos.is_empty()
+                {
                     let slider_size: f32 =
                         self.character_selected.as_ref().unwrap().combos.len() as f32 - 1.0;
-                    if slider_size < self.combo_selector { self.combo_selector = slider_size};
-                    let combo_selector = self.combo_selector as usize;
-                    let selected_combos = self.character_selected.as_ref().unwrap().combos[self.combo_selector as usize]
-                    .to_owned()
-                    .unwrap();
-                    if ui.add(
-                        egui::Slider::new(&mut self.combo_selector, 0.0..=slider_size).step_by(1.0).fixed_decimals(0).text(
-                            selected_combos.inputs,
-                        ),
-                    ).changed() {
-                        self.inputs = self.character_selected.as_ref().unwrap().combos[self.combo_selector as usize].clone().unwrap().inputs;
-
+                    if slider_size < self.combo_selector {
+                        self.combo_selector = slider_size
                     };
-                    
+                    let selected_combos = self.character_selected.as_ref().unwrap().combos
+                        [self.combo_selector as usize]
+                        .to_owned()
+                        .unwrap();
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut self.combo_selector, 0.0..=slider_size)
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .text(selected_combos.name),
+                        )
+                        .changed()
+                    {
+                        self.changed_inputs = true;
+                        self.mapped_inputs.clear();
+                        self.inputs = self.character_selected.as_ref().unwrap().combos
+                            [self.combo_selector as usize]
+                            .clone()
+                            .unwrap()
+                            .inputs;
+                    };
                 }
                 egui::CollapsingHeader::new("INPUTS").show(ui, |ui| {
                     let name_label = ui.label("Inputs: ");
-                    ui.text_edit_multiline(&mut self.inputs)
-                        .labelled_by(name_label.id);
+                    if ui
+                        .text_edit_multiline(&mut self.inputs)
+                        .labelled_by(name_label.id)
+                        .changed()
+                    {
+                        self.inputs = self.inputs.to_ascii_uppercase();
+                        self.changed_inputs = true;
+                        self.mapped_inputs.clear();
+                    };
                 });
-                if self.render_input && !self.inputs.is_empty() {
+                if ui.button("Toggle").clicked() {
+                    self.show_images = !self.show_images;
+                }
+                if self.show_images && !self.inputs.is_empty() && self.changed_inputs {
+                    self.changed_inputs = false;
+                    self.inputs = str::replace(&self.inputs, ',', " ");
+                    let mut translate: Vec<String> = Vec::new();
+                    for attack in self.game_json.as_ref().unwrap()["attacks"]
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                    {
+                        translate.push(attack.0.to_owned());
+                    }
+                    for movement in self.default_json["movement"].as_object().unwrap().iter() {
+                        translate.push(movement.0.to_owned());
+                    }
+                    // println!("{:?}", translate);
+                    //println!("{}", self.json["attacks"]);
+                    let inputs = self.inputs.split('\n');
+                    for combinations in inputs {
+                        let mut combinations: String = combinations.to_owned();
+                        self.mapped_inputs
+                            .push(compare_combinations(&mut combinations, &mut translate));
+                    }
+                } else if !self.show_images {
+                    self.changed_inputs = true;
+                    self.mapped_inputs.clear();
+                }
+                // println!("{:?}", self.mapped_inputs);
+                for translation in self.mapped_inputs.iter_mut().flatten() {
                     ui.horizontal_wrapped(|ui| {
-                        //ui.label("test");
-                        let mut temp_char: Option<String>;
-                        let mut append_next = false;
-                        let mut weight = None;
-                        for c in self.inputs.chars() {
-                            temp_char = logic_default::convert_to_arrow(c);
-                            if temp_char.is_none() {
-                                temp_char = translate_inputs(
-                                    &mut append_next,
-                                    &mut weight,
-                                    c,
-                                    &mut self.new_line,
-                                );
-                            };
-                            if temp_char.is_some() {
-                                if self.new_line {
-                                    self.new_line = false;
-                                    ui.end_row();
-                                    ui.vertical(|ui| {
-                                        ui.separator();
-                                    });
-                                } else {
-                                    let temp_char = temp_char.unwrap().to_string();
-                                    let mut images_path = String::new();
-                                    if let Some(selected) = self
-                                        .game_list
-                                        .to_owned()
-                                        .unwrap()
-                                        .get(self.game_selected.to_owned().unwrap())
-                                    {
-                                        if !temp_char.contains("default") {
-                                            let selected = selected.to_string().remove_quotes();
-                                            images_path =
-                                                format!("images\\{}\\{}", selected, temp_char);
-                                        } else {
-                                            images_path = format!("images\\{}", temp_char);
-                                        }
-                                    }
-                                    // let selected = self.game_list.clone().unwrap().get(self.game_selected.clone().unwrap());
-                                    // println!("{}", temp_char);
-                                    // let tmp = format!("images\\{}\\{}", selected.unwrap(), temp_char);
-                                    let mut temp_bytes = File::open(images_path).unwrap();
-                                    let mut buffer = Vec::new();
-                                    temp_bytes.read_to_end(&mut buffer).unwrap();
-
-                                    let image = RetainedImage::from_image_bytes(temp_char, &buffer)
-                                        .unwrap();
-                                    image.show(ui);
+                        for input in translation.iter_mut() {
+                            // println!("651: {}", input);
+                            if let Some(m) = self.game_json.as_ref().unwrap()["attacks"]
+                                .as_object()
+                                .unwrap()
+                                .get(input)
+                                .or(self.default_json["movement"]
+                                    .as_object()
+                                    .unwrap()
+                                    .get(input))
+                            {
+                                // find the index that has m in self.retained_images
+                                let idx = self.retained_images.iter().position(|x| {
+                                    // println!("{} - {}", x.as_ref().unwrap().debug_name(), m.to_string().remove_quotes());
+                                    // println!("{} - {}", x.as_ref().unwrap().debug_name(), m.to_string().remove_quotes());
+                                    x.as_ref().unwrap().debug_name()
+                                        == m.to_string().remove_quotes()
+                                });
+                                if let Some(idx) = idx {
+                                    self.retained_images[idx].as_ref().unwrap().show(ui);
                                 }
-                            };
-
-                            // // Show the image:
-                            // ui.add(egui::Image::new(texture, texture.size_vec2()));
-
-                            // // Shorter version:
-                            // ui.image(texture, texture.size_vec2());
+                            } else {
+                                // println!("{}", self.json_default["movement"]["_"]);
+                                if let Some(m) = self.default_json["movement"].get("_") {
+                                    let idx = self.retained_images.iter().position(|x| {
+                                        // println!("{} - {}", x.as_ref().unwrap().debug_name(), "default\\\\err.png".to_string().remove_quotes());
+                                        x.as_ref().unwrap().debug_name().trim()
+                                            == m.to_string().remove_quotes()
+                                    });
+                                    if let Some(idx) = idx {
+                                        self.retained_images[idx].as_ref().unwrap().show(ui);
+                                    }
+                                }
+                            }
                         }
+                        // println!("__");
+                        // add egui separator
+                    });
+                    ui.vertical(|ui| {
+                        ui.separator();
                     });
                 }
-                if ui.button("Toggle").clicked() {
-                    self.render_input = !self.render_input;
-                }
-                
+
                 if let Some(previous) = self.character_selected.as_ref() {
                     self.previous_choice = Some(previous.name.to_owned());
-
                 } else {
                     self.previous_choice = Some("Select a character".to_string());
-                    
                 }
 
                 //ui.label(format!("Hello '{}', age {}", self.name, self.age));
